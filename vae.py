@@ -30,7 +30,7 @@ FILLED_WEIGHT = 0.5
 # VAE Tricks : https://nbviewer.org/github/neurokinetikz/deep-pensieve/blob/master/Deep%20Pensieve.ipynb
 # Y should be up
 # Resolve memory leak: sudo fuser -v /dev/nvidia*  ;   sudo kill -9 XXXXX
-# TODO encode block with neighbors and feed decoder with encode(embed(bock) + embed(neighbors)) to recreate input. should result in less seams.
+# TODO encode block and neighbors and feed decoder with encode(embed(bock) + embed(neighbors)) to recreate input. should result in less seams.
 
 
 @jax.vmap
@@ -93,7 +93,7 @@ def main():
 
     # Make sure tf does not allocate gpu memory.
     tf.config.experimental.set_visible_devices([], 'GPU')
-    model_datas = utils.load_model_data(load_pickled=True, min_size=resolution)
+    model_datas = utils.load_model_data(load_pickled=False, min_size=resolution)
 
     if config["batch_size"] % jax.device_count() > 0:
         raise ValueError('Batch size must be divisible by the number of devices')

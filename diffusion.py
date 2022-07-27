@@ -490,7 +490,7 @@ class Trainer(object):
             train_num_steps,
             train_lr,
             adam_betas=(0.9, 0.999),
-            save_and_sample_every=5000,
+            save_and_sample_every=10000,
             eval_batchsize=1,
             warmup_steps = 5000,
             workdir=None,

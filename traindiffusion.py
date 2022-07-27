@@ -7,7 +7,6 @@ import flax.linen as nn
 from jax import random
 import utils as utils
 import numpy as np
-from skimage.util.shape import view_as_blocks
 import tensorflow as tf
 from flax import jax_utils
 from diffusion import Unet, GaussianDiffusion, Trainer
