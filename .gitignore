@@ -1,0 +1,12 @@
+runs/*
+vanilla_results/*
+venv/*
+.idea/*
+results/*
+results*/*
+interpolation*/*
+data/*
+*.binvox
+*.p
+__pycache__/*
+old.git/*
