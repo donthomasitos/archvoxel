@@ -59,6 +59,8 @@ def compute_metrics(recon_x, x, mean, logvar):
 
 
 def main():
+    run_name = "vae_" + input("run name: vae_")
+
     with open("config.json", "r") as stream:
         config = json.load(stream)
 
@@ -72,7 +74,7 @@ def main():
             bce_loss = binary_cross_entropy(recon_x, batch).mean()
             kld_loss = kl_divergence(mean, logvar).mean()
             # https://www.microsoft.com/en-us/research/blog/less-pain-more-gain-a-simple-method-for-vae-training-with-less-of-that-kl-vanishing-agony/
-            loss = bce_loss + config["kl_weight"] * kld_loss * jnp.clip(state.step/5000, 0.0001, 1.0)
+            loss = bce_loss + config["kl_weight"] * kld_loss #* jnp.clip(state.step/5000, 0.0001, 1.0)
             return loss, (bce_loss, kld_loss)
 
         grads, (bce_loss, kld_loss) = jax.grad(loss_fn, has_aux=True)(state.params)
@@ -93,7 +95,7 @@ def main():
 
     # Make sure tf does not allocate gpu memory.
     tf.config.experimental.set_visible_devices([], 'GPU')
-    model_datas = utils.load_model_data(load_pickled=False, min_size=resolution)
+    model_datas = utils.load_model_data(load_pickled=True, min_size=resolution)
 
     if config["batch_size"] % jax.device_count() > 0:
         raise ValueError('Batch size must be divisible by the number of devices')
@@ -122,8 +124,6 @@ def main():
     in_shape = test_out_ds.shape[2:]  # skip device and batch
     #test_out_ds = np.reshape(test_out_ds, (-1, *in_shape))
     print("Occupancy Ratio:", np.mean(test_out_ds), "Inshape:", in_shape)
-
-    run_name = "vae_" + input("run name: vae_")
     os.makedirs(f"results/{run_name}", exist_ok=True)
     workdir = "runs/" + run_name
     writer = SummaryWriter(workdir)
@@ -159,10 +159,12 @@ def main():
             train_bce = np.mean(train_stats[0])
             train_kld = np.mean(train_stats[1])
 
-            e_decay = 0.95  # very low! should be ~ .995
-            ema = jax.tree_map(lambda e, p: e * e_decay + (1 - e_decay) * p, ema, jax_utils.unreplicate(state).params)
+            if step != 0 and step % 100 == 0:
+                # follow https://arxiv.org/pdf/2207.04316.pdf with 0.99 every 100 steps
+                e_decay = 0.99
+                ema = jax.tree_map(lambda e, p: e * e_decay + (1 - e_decay) * p, ema, jax_utils.unreplicate(state).params)
 
-            if step != 0 and step % 2000 == 0:
+            if step != 0 and step % 1000 == 0:
                 utils.save_checkpoint(state, workdir)
                 checkpoints.save_checkpoint(workdir + "_ema", ema, step, keep=2)
 
