@@ -32,7 +32,7 @@ def main():
     lat_dim = vae_params["z_channels"] * ((vae_params["resolution"] // (2 ** (len(vae_params["ch_mult"])-1))) ** 3)
     print(f"Latent Diffusion size: {lat_size}, {lat_size}, {lat_size}, {lat_dim}. Dimensionality: {(lat_size ** 3) * lat_dim}")
 
-    model_datas = utils.load_model_data(load_pickled=False, min_size=config["scene_res"])
+    model_datas = utils.load_model_data(load_pickled=True, min_size=config["scene_res"])
 
     rng = jax.random.PRNGKey(0)
     rng, key, z_rng = jax.random.split(rng, 3)

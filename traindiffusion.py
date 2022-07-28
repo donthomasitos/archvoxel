@@ -35,7 +35,7 @@ def main():
         vae_local = None
 
     model = Unet(
-        dim=256,
+        dim=config["dim"],
         dim_mults=(1, 2),
         out_dim=lat_dim
     )

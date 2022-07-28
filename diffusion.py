@@ -193,7 +193,7 @@ class Unet(nn.Module):
 
     @nn.compact
     def __call__(self, x, time):
-        x = nn.Conv(self.init_dim, kernel_size=(7, 7, 7), padding="SAME")(x)  # TODO ref has kernel 3
+        x = nn.Conv(self.init_dim, kernel_size=(3, 3, 3), padding="SAME")(x)
         r = jnp.copy(x)
 
         # time embedding
@@ -500,7 +500,6 @@ class Trainer(object):
     ):
         super().__init__()
 
-        # TODO original keeps track of a exponential moving average verson of the model. Try it.
         self.model = diffusion_model
         self.eval_batchsize = eval_batchsize
         self.save_and_sample_every = save_and_sample_every
