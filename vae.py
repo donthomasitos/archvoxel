@@ -177,8 +177,7 @@ def main():
                 pool.apply_async(func=utils.save_image, args=(np.array(comparison[0]), f'results/{run_name}/reconstruction_{state.step[0]}.png', NUM_EVAL_EXAMPLES))
                 pool.apply_async(func=utils.save_image, args=(np.array(sample[0]), f'results/{run_name}/sample_{state.step[0]}.png', NUM_EVAL_EXAMPLES))
 
-                print('step: {}, loss: {:.4f}, BCE: {:.4f}, KLD: {:.4f}, Train: BCE: {:.4f}, KLD: {:.4f}'.format(step, np.mean(metrics['loss']), np.mean(metrics['bce']),
-                                                                                                                          np.mean(metrics['kld']), train_bce, train_kld))
+                print('step: {}, loss: {:.4f}, BCE: {:.4f}, KLD: {:.4f}'.format(step, np.mean(metrics['loss']), np.mean(metrics['bce']), np.mean(metrics['kld'])))
                 writer.add_scalar("vae/loss", np.mean(metrics['loss']), state.step[0])
                 writer.add_scalar("vae/bce", np.mean(metrics['bce']), state.step[0])
                 writer.add_scalar("vae/kld", np.mean(metrics['kld']), state.step[0])

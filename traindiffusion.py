@@ -52,7 +52,7 @@ def main():
     trainer = Trainer(
         diffusion_model=diffusion,
         train_batch_size=32,
-        train_lr=4e-5,  # Ho et al have 2e-5
+        train_lr=2e-5,  # Ho et al have 2e-5
         train_num_steps=1000000,  # total training steps
         warmup_steps=1000,  # Ho et al have 5000
         workdir=workdir,

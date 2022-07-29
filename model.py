@@ -4,7 +4,7 @@ import jax.numpy as jnp
 from jax import random
 
 # Reference: https://github.com/CompVis/latent-diffusion/blob/main/ldm/modules/diffusionmodules/model.py
-# TOD O remove bias parameters in layers before norms
+# TODO remove bias parameters in layers before norms
 
 
 def norm():
@@ -24,6 +24,7 @@ class Upsample(nn.Module):
 
     def __call__(self, x):
         xs = x.shape
+        # TODO try convTranspose
         x = jax.image.resize(x, (xs[0], xs[1] * 2, xs[2] * 2, xs[3] * 2, xs[4]), method=jax.image.ResizeMethod.NEAREST)
         x = self.conv(x)
         return x
@@ -103,7 +104,7 @@ class Encoder(nn.Module):
         # end
         h = norm()(h)
         h = activ(h)
-        mean = nn.Conv(self.z_channels, (3, 3, 3), strides=(1, 1, 1))(h)
+        mean = nn.Conv(self.z_channels, (3, 3, 3), strides=(1, 1, 1))(h)  # TODO one operation and then split
         logvar = nn.Conv(self.z_channels, (3, 3, 3), strides=(1, 1, 1))(h)
         return mean, logvar
 

@@ -18,7 +18,7 @@ import tensorflow as tf
 import binvox_rw
 from flax.training import checkpoints
 
-# Reference (Torch), 17.07: https://github.com/lucidrains/denoising-diffusion-pytorch/blob/2b742dd2ccd899f24111b0fba4d3726e65b8c88e/denoising_diffusion_pytorch/denoising_diffusion_pytorch.py
+# Reference (Torch): https://github.com/lucidrains/denoising-diffusion-pytorch/blob/2b742dd2ccd899f24111b0fba4d3726e65b8c88e/denoising_diffusion_pytorch/denoising_diffusion_pytorch.py
 
 # constants
 
@@ -211,7 +211,7 @@ class Unet(nn.Module):
             #x = resnet(dim_in, dim_in)(x, t)
             #h.append(x)
             x = resnet(dim_in, dim_in)(x, t)
-            x = SelfAtt()(x)
+            x = SelfAtt()(x)  # TODO is it really helpful to have Att in *every* layer?
             h.append(x)
 
             if is_last:
@@ -492,7 +492,7 @@ class Trainer(object):
             adam_betas=(0.9, 0.999),
             save_and_sample_every=10000,
             eval_batchsize=1,
-            warmup_steps = 5000,
+            warmup_steps=5000,
             workdir=None,
             h5path=None,
             verbose=True,

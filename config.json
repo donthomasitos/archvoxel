@@ -1,14 +1,14 @@
 {
   "learning_rate": 1e-4,
-  "batch_size": 32,
+  "batch_size": 64,
   "kl_weight": 2.0,
 
   "local_vae":
   {
-    "z_channels": 16,
-    "ch": 64,
+    "z_channels": 8,
+    "ch": 32,
     "num_res_blocks": 2,
-    "ch_mult": [1,2,4,8],
+    "ch_mult": [1,2,4,8,16],
     "resolution": 32,
     "attn_resolutions": []
   },
@@ -16,6 +16,8 @@
 
   "scene_res": 256,
   "timesteps": 1000,
-  "sampling_timesteps": 250
+  "sampling_timesteps": 250,
+
+  "dim": 256
 }
 
