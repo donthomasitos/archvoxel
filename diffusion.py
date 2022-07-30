@@ -278,7 +278,6 @@ class GaussianDiffusion(nn.Module):
     loss_type: str = 'l1'
     objective:str = 'pred_noise'
     beta_schedule = 'cosine'
-    ddim_sampling_eta = 1.
 
     def setup(self):
         super().__init__()
@@ -304,26 +303,14 @@ class GaussianDiffusion(nn.Module):
 
         # sampling related parameters
         assert self.sampling_timesteps <= timesteps
-        self.is_ddim_sampling = self.sampling_timesteps < timesteps
 
         self.alphas_cumprod_prev = to_jnp(alphas_cumprod_prev)
 
         # calculations for diffusion q(x_t | x_{t-1}) and others
         self.sqrt_alphas_cumprod = to_jnp(np.sqrt(alphas_cumprod))
         self.sqrt_one_minus_alphas_cumprod = to_jnp(np.sqrt(1. - alphas_cumprod))
-        self.log_one_minus_alphas_cumprod = to_jnp(np.log(1. - alphas_cumprod))
         self.sqrt_recip_alphas_cumprod = to_jnp(np.sqrt(1. / alphas_cumprod))
         self.sqrt_recipm1_alphas_cumprod = to_jnp(np.sqrt(1. / alphas_cumprod - 1))
-
-        # calculations for posterior q(x_{t-1} | x_t, x_0)
-        posterior_variance = betas * (1. - alphas_cumprod_prev) / (1. - alphas_cumprod)
-        # above: equal to 1. / (1. / (1. - alpha_cumprod_tm1) + alpha_t / beta_t)
-        self.posterior_variance = to_jnp(posterior_variance)
-        # below: log calculation clipped because the posterior variance is 0 at the beginning of the diffusion chain
-        self.posterior_log_variance_clipped = to_jnp(np.log(np.maximum(1e-20, posterior_variance)))
-        self.posterior_mean_coef1 = to_jnp((betas * np.sqrt(alphas_cumprod_prev) / (1. - alphas_cumprod)))
-        self.posterior_mean_coef2 = to_jnp(((1. - alphas_cumprod_prev) * np.sqrt(alphas) / (1. - alphas_cumprod)))
-
 
     def predict_start_from_noise(self, x_t, t, noise):
         return (
@@ -333,15 +320,6 @@ class GaussianDiffusion(nn.Module):
 
     def predict_noise_from_start(self, x_t, t, x0):
         return (extract(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t - x0) / extract(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape)
-
-    def q_posterior(self, x_start, x_t, t):
-        posterior_mean = (
-                extract(self.posterior_mean_coef1, t, x_t.shape) * x_start +
-                extract(self.posterior_mean_coef2, t, x_t.shape) * x_t
-        )
-        posterior_variance = extract(self.posterior_variance, t, x_t.shape)
-        posterior_log_variance_clipped = extract(self.posterior_log_variance_clipped, t, x_t.shape)
-        return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
     def model_predictions(self, x, t):
         model_output = self.model(x, t)
@@ -358,29 +336,8 @@ class GaussianDiffusion(nn.Module):
 
         assert False
 
-    def p_mean_variance(self, x, t):
-        preds = self.model_predictions(x, t)
-        x_start = preds.pred_x_start
-        model_mean, posterior_variance, posterior_log_variance = self.q_posterior(x_start=x_start, x_t=x, t=t)
-        return model_mean, posterior_variance, posterior_log_variance
-
-    def p_sample(self, x, rng, t: int):
-        n0 = rng
-        batched_times = jnp.full((x.shape[0],), t, dtype=jnp.int32)
-        model_mean, _, model_log_variance = self.p_mean_variance(x=x, t=batched_times)
-        noise = jax.random.normal(n0, x.shape) if t > 0 else 0.  # no noise if t == 0
-        return model_mean + jnp.exp(0.5 * model_log_variance) * noise
-
-    def p_sample_loop(self, rng, shape):
-        n0, n1 = jax.random.split(rng)
-
-        img = jax.random.normal(n0, shape)
-        for t in tqdm(reversed(range(0, self.num_timesteps)), desc='sampling loop time step'):
-            img = self.p_sample(img, n1, t)
-        return img
-
     # https://github.com/ermongroup/ddim/blob/main/functions/denoising.py
-    def ddim_sample(self, rng, shape):
+    def ddim_sample(self, rng, shape, ddim_sampling_eta=0.0):
         n0, rng = jax.random.split(rng)
         batch = shape[0]
         times = jnp.linspace(0., self.num_timesteps, num=self.sampling_timesteps + 2)[:-1]
@@ -394,29 +351,15 @@ class GaussianDiffusion(nn.Module):
             time_cond = jnp.full((batch,), time, dtype=jnp.int32)
             pred_noise, x_start, *_ = self.model_predictions(img, time_cond)
 
-            sigma = self.ddim_sampling_eta * jnp.sqrt((1 - alpha / alpha_next) * (1 - alpha_next) / (1 - alpha))
+            sigma = ddim_sampling_eta * jnp.sqrt((1 - alpha / alpha_next) * (1 - alpha_next) / (1 - alpha))
             c = jnp.sqrt((1 - alpha_next) - sigma ** 2)
             n1, rng = jax.random.split(rng)
-            noise = jax.random.normal(n1, img.shape) if time_next > 0 else 0.
+            noise = jax.random.normal(n1, img.shape) if time_next > 0 else 0.  # TODO original DDIM does not have this branching
             img = x_start * jnp.sqrt(alpha_next) + c * pred_noise + sigma * noise
         return img
 
     def sample(self, rng, batch_size=16):
-        sample_fn = self.p_sample_loop if not self.is_ddim_sampling else self.ddim_sample
-        return sample_fn(rng, (batch_size, self.image_size, self.image_size, self.image_size, self.channels))
-
-    def interpolate(self, x1, x2, rng, t=None, lam=0.5):
-        b = x1.shape[0]
-        t = default(t, self.num_timesteps - 1)
-        assert x1.shape == x2.shape
-        t_batched = jnp.stack([jnp.array(t)] * b)
-        xt1, xt2 = map(lambda x: self.q_sample(rng, x, t=t_batched), (x1, x2))
-        img = (1 - lam) * xt1 + lam * xt2
-        for i in tqdm(reversed(range(0, t)), desc='interpolation sample time step', total=t):
-            rng, n0 = jax.random.split(rng)
-            img = self.p_sample(img, n0, jnp.full((b,), i, dtype=jnp.int32))
-
-        return img
+        return self.ddim_sample(rng, (batch_size, self.image_size, self.image_size, self.image_size, self.channels))
 
     def q_sample(self, rng, x_start, t, noise=None):
         noise = default(noise, lambda: jax.random.normal(rng, x_start.shape))
@@ -432,10 +375,9 @@ class GaussianDiffusion(nn.Module):
 
         if self.objective == 'pred_noise':
             target = noise
-        elif self.objective == 'pred_x0':
-            target = x_start
         else:
-            raise ValueError(f'unknown objective {self.objective}')
+            assert (self.objective == 'pred_x0')
+            target = x_start
 
         if self.loss_type == 'l1':
             loss = jnp.abs(model_out - target)
