@@ -17,7 +17,14 @@
   "scene_res": 256,
   "timesteps": 1000,
   "sampling_timesteps": 250,
+  "loss_type": "l1",
 
-  "dim": 256
+  "unet":
+  {
+    "dim": 256,
+    "dim_mults": [1,2]
+  },
+
+  "diff_run": "diff_larger_64_retrain"
 }
 

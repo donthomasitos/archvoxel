@@ -303,7 +303,6 @@ class GaussianDiffusion(nn.Module):
 
         # sampling related parameters
         assert self.sampling_timesteps <= timesteps
-
         self.alphas_cumprod_prev = to_jnp(alphas_cumprod_prev)
 
         # calculations for diffusion q(x_t | x_{t-1}) and others
@@ -336,30 +335,32 @@ class GaussianDiffusion(nn.Module):
 
         assert False
 
+    def get_img_shape(self, batch):
+        return batch, self.image_size, self.image_size, self.image_size, self.channels
+
     # https://github.com/ermongroup/ddim/blob/main/functions/denoising.py
-    def ddim_sample(self, rng, shape, ddim_sampling_eta=0.0):
-        n0, rng = jax.random.split(rng)
-        batch = shape[0]
+    # TODO jit this function.
+    def ddim_sample(self, img, rng, ddim_sampling_eta=0.0):
+        batch_size = img.shape[0]
+        assert rng is not None or ddim_sampling_eta == 0.0
         times = jnp.linspace(0., self.num_timesteps, num=self.sampling_timesteps + 2)[:-1]
         times = list(reversed(times.astype(jnp.int32).tolist()))
         time_pairs = list(zip(times[:-1], times[1:]))
-        img = jax.random.normal(n0, shape)
 
         for time, time_next in tqdm(time_pairs, desc='sampling loop time step'):
             alpha = self.alphas_cumprod_prev[time]
             alpha_next = self.alphas_cumprod_prev[time_next]
-            time_cond = jnp.full((batch,), time, dtype=jnp.int32)
+            time_cond = jnp.full((batch_size,), time, dtype=jnp.int32)
             pred_noise, x_start, *_ = self.model_predictions(img, time_cond)
 
             sigma = ddim_sampling_eta * jnp.sqrt((1 - alpha / alpha_next) * (1 - alpha_next) / (1 - alpha))
             c = jnp.sqrt((1 - alpha_next) - sigma ** 2)
-            n1, rng = jax.random.split(rng)
-            noise = jax.random.normal(n1, img.shape) if time_next > 0 else 0.  # TODO original DDIM does not have this branching
-            img = x_start * jnp.sqrt(alpha_next) + c * pred_noise + sigma * noise
+            img = x_start * jnp.sqrt(alpha_next) + c * pred_noise
+            if sigma != 0.0:
+                n1, rng = jax.random.split(rng)
+                noise = jax.random.normal(n1, img.shape) if time_next > 0 else 0.  # TODO original DDIM does not have this branching
+                img = img + sigma * noise
         return img
-
-    def sample(self, rng, batch_size=16):
-        return self.ddim_sample(rng, (batch_size, self.image_size, self.image_size, self.image_size, self.channels))
 
     def q_sample(self, rng, x_start, t, noise=None):
         noise = default(noise, lambda: jax.random.normal(rng, x_start.shape))
@@ -401,27 +402,7 @@ class GaussianDiffusion(nn.Module):
         return self.p_losses(n1, img, t, *args, **kwargs)
 
 
-def plot_latent(latent, vae_local, filename):
-    latent_preshape = latent.shape
-    # print("latent_preshape", latent_preshape)
-    latent_size = int(round(((latent.shape[-1] // vae_local.z_channels) ** (1.0 / 3.0))))
-    latent = jnp.reshape(latent, (latent.shape[0] ** 3, latent_size, latent_size, latent_size, vae_local.z_channels))
-    BATCH_SIZE = 64
-    assert latent.shape[0] % BATCH_SIZE == 0
-    latent_splits = latent.shape[0] // BATCH_SIZE
-    batch = jnp.split(latent, latent_splits, axis=0)
-    print("Decoding in to voxels...")
-    voxels = [vae_local.decoder(split) for split in batch]
-    voxels = jnp.concatenate(voxels, axis=0)
 
-    print("Saving to file...")
-    voxels = jnp.reshape(voxels, (*latent_preshape[0:3], *voxels.shape[1:]))
-    voxels = utils.undo_view_as_blocks(voxels)
-    if os.path.exists(filename):
-        os.remove(filename)
-    with open(filename, "wb") as fp:
-        out_data = np.array(voxels[:, :, :, 0]) > 0.5
-        binvox_rw.Voxels(out_data, (out_data.shape[0], out_data.shape[1], out_data.shape[2]), (0, 0, 0), 1.0, 'xyz').write(fp)
 
 
 class Trainer(object):
@@ -501,7 +482,7 @@ class Trainer(object):
 
         eval_latents = self.ref_batch[0, 0, :, :, :, :self.model.channels]  # (Device, Batch, x, y, z, c)
         print("Plotting latent_to_voxels.binvox...")
-        plot_latent(eval_latents, self.vae_local, self.workdir + f"/latent_to_voxels.binvox")
+        utils.save_voxels(utils.latent_to_voxels(eval_latents, self.vae_local), self.workdir + f"/latent_to_voxels.binvox")
 
         rng = jax.random.PRNGKey(0)
         rng_eval = jax.random.PRNGKey(1337)
@@ -544,15 +525,14 @@ class Trainer(object):
                     checkpoints.save_checkpoint(self.workdir + "_ema", self.ema, step, keep=1)
 
                     if self.vae_local is not None:
-                        batches = num_to_groups(self.eval_batchsize, self.batch_size)  # TODO this eval stuff seams to leak memory
                         model_bound = self.model.bind({'params': jax_utils.unreplicate(self.state).params})
-                        all_latents_list = list(map(lambda n: model_bound.sample(rng_eval, batch_size=n), batches))
+                        img = jax.random.normal(jax.random.PRNGKey(0), self.model.get_img_shape(1))
+                        latents = model_bound.ddim_sample(img, rng_eval)
                         del model_bound
-                        all_latents = jnp.concatenate(all_latents_list, axis=0)
                         vox_path = self.workdir + f"/{step}.binvox"
-                        plot_latent(all_latents[0], self.vae_local, vox_path)
+                        utils.save_voxels(utils.latent_to_voxels(latents[0], self.vae_local), vox_path)
                         print(f"Saved to {vox_path}")
-                        writer.add_scalar("diff/diff_to_ref", np.mean(np.square(eval_latents - all_latents[0])), step)
+                        writer.add_scalar("diff/diff_to_ref", np.mean(np.square(eval_latents - latents[0])), step)
                 step += 1
                 l += 1
                 pbar.update(1)

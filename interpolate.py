@@ -1,6 +1,4 @@
 import jax, pickle
-import jax.numpy as jnp
-import optax
 import json
 import flax.linen as nn
 from jax import random
@@ -8,21 +6,13 @@ import utils as utils
 from model import VAE, reparameterize
 import numpy as np
 from multiprocessing import Process, Pool
-
+import matplotlib, time
 #jax.config.update('jax_platform_name', 'cpu')
-
-
-def slerp(val, low, high):
-    omega = np.arccos(np.clip(np.dot(low/np.linalg.norm(low), high/np.linalg.norm(high)), -1, 1))
-    so = np.sin(omega)
-    if so == 0:
-        return (1.0-val) * low + val * high # L'Hopital's rule/LERP
-    return np.sin((1.0-val)*omega) / so * low + np.sin(val*omega) / so * high
-
 
 def main():
     rng = random.PRNGKey(0)
     rng, key, z_rng = random.split(rng, 3)
+    start_time = time.time()
 
     with open("config.json", "r") as stream:
         config = json.load(stream)
@@ -30,14 +20,6 @@ def main():
     l_vae_params = config["local_vae"]
     resolution = l_vae_params["resolution"]
     workdir = "runs/" + config["local_run"]
-
-    @jax.jit
-    def eval(images, z_rng, state):
-        def eval_model(vae):
-            recon_images, mean, logvar = vae(images, z_rng)
-            return recon_images
-
-        return nn.apply(eval_model, VAE(**l_vae_params))({'params': state.params})
 
     @jax.jit
     def get_latent(images, state):
@@ -64,7 +46,7 @@ def main():
 
     print("Loading model datas...")
     model_datas = utils.load_model_data(load_pickled=True, min_size=resolution)
-    rng = np.random.default_rng(1)
+    rng = np.random.default_rng(3)
     start_img = np.expand_dims(utils.get_random_part(rng, model_datas[0], resolution, use_empty_probab=0.0), axis=[0, -1])
     final_img = np.expand_dims(utils.get_random_part(rng, model_datas[1], resolution, use_empty_probab=0.0), axis=[0, -1])
 
@@ -86,8 +68,8 @@ def main():
             latent_var  = latent_s[1] * mixv + latent_f[1] * (1.0 - mixv)
         else:
             pre_shape = latent_s[0].shape
-            means.append(np.reshape(slerp(mixv, latent_s[0].flatten(), latent_f[0].flatten()), pre_shape))
-            vars.append(np.reshape(slerp(mixv, latent_s[1].flatten(), latent_f[1].flatten()), pre_shape))
+            means.append(np.reshape(utils.slerp(mixv, latent_s[0].flatten(), latent_f[0].flatten()), pre_shape))
+            vars.append(np.reshape(utils.slerp(mixv, latent_s[1].flatten(), latent_f[1].flatten()), pre_shape))
     means = np.concatenate(means, axis=0)
     vars = np.concatenate(vars, axis=0)
 
@@ -96,6 +78,9 @@ def main():
     proc_res.extend([pool.apply_async(func=utils.save_image, args=(np.expand_dims(recon_images[it], axis=0), "interpolation/slerp_%d.png" % it, 1)) for it in range(INTERPOL_STEPS)])
     for p_c in proc_res:
         p_c.get(timeout=100)
+
+    print("Duration:", time.time() - start_time)
+
 
 if __name__ == "__main__":
     main()

@@ -179,3 +179,50 @@ def undo_view_as_blocks(x):
         if np.all(a == np.reshape(np.transpose(a_block, p), a.shape)):
             print (p)'''
     return np.reshape(np.transpose(x, [0, 3, 1, 4, 2, 5, 6]), (new_dim, new_dim, new_dim, x.shape[-1]))
+
+
+def slerp(val, low, high):
+    omega = np.arccos(np.clip(np.dot(low/np.linalg.norm(low), high/np.linalg.norm(high)), -1, 1))
+    so = np.sin(omega)
+    if so == 0:
+        return (1.0-val) * low + val * high # L'Hopital's rule/LERP
+    return np.sin((1.0-val)*omega) / so * low + np.sin(val*omega) / so * high
+
+
+def get_lat_size(config):
+    vae_params = config["local_vae"]
+    return config["scene_res"] // vae_params["resolution"]
+
+
+def get_lat_dim(config):
+    vae_params = config["local_vae"]
+    return vae_params["z_channels"] * ((vae_params["resolution"] // (2 ** (len(vae_params["ch_mult"]) - 1))) ** 3)
+
+
+# latent: latent from diffusion process
+# outputs 3D array of voxel data
+def latent_to_voxels(latent, vae_local):
+    latent_preshape = latent.shape
+    # print("latent_preshape", latent_preshape)
+    latent_size = int(round(((latent.shape[-1] // vae_local.z_channels) ** (1.0 / 3.0))))
+    latent = jnp.reshape(latent, (latent.shape[0] ** 3, latent_size, latent_size, latent_size, vae_local.z_channels))
+    BATCH_SIZE = 64
+    assert latent.shape[0] % BATCH_SIZE == 0
+    latent_splits = latent.shape[0] // BATCH_SIZE
+    batch = jnp.split(latent, latent_splits, axis=0)
+    print("Decoding in to voxels...")
+    voxels = [vae_local.decoder(split) for split in batch]
+    voxels = jnp.concatenate(voxels, axis=0)
+    voxels = jnp.reshape(voxels, (*latent_preshape[0:3], *voxels.shape[1:]))
+    voxels = undo_view_as_blocks(voxels)
+    return voxels
+
+
+def save_voxels(voxels, filename):
+    print("Saving to file ", filename)
+    if os.path.exists(filename):
+        os.remove(filename)
+    with open(filename, "wb") as fp:
+        out_data = np.array(voxels[:, :, :, 0]) > 0.5
+        binvox_rw.Voxels(out_data, (out_data.shape[0], out_data.shape[1], out_data.shape[2]), (0, 0, 0), 1.0, 'xyz').write(fp)
+
